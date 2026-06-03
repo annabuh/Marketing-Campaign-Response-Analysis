@@ -1,0 +1,203 @@
+---
+title: "Dashboard - Marketing Campaign Response"
+author: Anna Bukharova
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+---
+
+```{r setup, include=FALSE}
+# install.packages("flexdashboard")
+library(flexdashboard)
+library(lubridate)
+library (ggplot2)
+library(magrittr) 
+library(dplyr)
+library (coin)
+library(rpart.plot)
+library(readr)
+library(pROC)
+
+data = read_csv("~/Documents/r files/ml_project1_data.csv")
+data$week = wday(data$Dt_Customer, label = TRUE)
+data$Response = as.factor(data$Response)
+```
+
+```{r}
+# Income groups
+data3 = data %>% filter(!is.na(Income))
+mean_income = mean(data3$Income)
+data3 = mutate(data3,
+  income_group = factor(case_when(
+    Income < mean_income ~ "Below average",
+    TRUE ~ "Above average"
+  ))
+)
+
+# Model
+set.seed(888)
+train_index = sample(1:nrow(data), 
+                      size = 0.8 * nrow(data))
+train = data[train_index, ]
+test  = data[-train_index, ]
+
+tree = rpart(
+  Response ~ Income + NumWebPurchases + Recency,
+  data = train, method = "class",
+  weights = ifelse(train$Response == 1, 5, 1)
+)
+pred_class = predict(tree, newdata = test, 
+                      type = "class")
+pred_prob  = predict(tree, newdata = test, 
+                      type = "prob")
+accuracy   = round(mean(pred_class == test$Response), 2)
+roc_obj    = roc(test$Response, pred_prob[, 2], 
+                  quiet = TRUE)
+auc_val    = round(auc(roc_obj), 2)
+```
+
+Page 1: Customer research {data-icon="fa-users"}
+===
+
+Column {data-width=500}
+---
+
+### Income level affects campaign response
+
+```{r}
+plot_income = data3 %>%
+  filter(Response == 1) %>%
+  group_by(income_group) %>%
+  summarise(count = n()) %>%
+  mutate(pct = round(count / sum(count) * 100, 1))
+
+ggplot(plot_income, 
+       aes(x = income_group, y = count)) +
+  geom_bar(stat = "identity", fill = "#104E8B") +
+  geom_text(aes(label = paste0(count, 
+                               " (", pct, "%)")),
+            vjust = -0.5, size = 3.5) +
+  labs(x = "Income group", 
+       y = "Number of responses") +
+  theme_classic()
+```
+
+### Income × Response
+
+```{r}
+valueBox("p < 0.001 — significant", 
+         icon = "fa-check-circle",
+         color = "success")
+```
+
+Column {data-width=500}
+---
+
+### Recently active customers respond more
+
+```{r}
+ggplot(data, aes(x = Response, y = Recency)) +
+  geom_boxplot(fill = "#BFEFFF") +
+  labs(x = "Campaign response (0 = No, 1 = Yes)",
+       y = "Days since last purchase") +
+  theme_classic()
+```
+
+### Recency × Response
+
+```{r}
+valueBox("p < 0.001 — significant",
+         icon = "fa-check-circle",
+         color = "success")
+```
+
+Page 2: Purchase Behaviour {data-icon="fa-shopping-cart"}
+===
+
+Column {data-width=500}
+---
+
+### Web purchases associated with higher response
+
+```{r}
+ggplot(data, aes(x = Response, 
+                 y = NumWebPurchases)) +
+  geom_boxplot(fill = "#BFEFFF") +
+  labs(x = "Campaign response (0 = No, 1 = Yes)",
+       y = "Number of web purchases") +
+  theme_classic()
+```
+
+### Web purchases × Response
+
+```{r}
+valueBox("p < 0.001 — significant",
+         icon = "fa-check-circle",
+         color = "success")
+```
+
+Column {data-width=500}
+---
+
+### In-store purchases show no significant pattern
+
+```{r}
+ggplot(data, aes(x = Response, 
+                 y = NumStorePurchases)) +
+  geom_boxplot(fill = "#BFEFFF") +
+  labs(x = "Campaign response (0 = No, 1 = Yes)",
+       y = "Number of store purchases") +
+  theme_classic()
+```
+
+### Store purchases × Response
+
+```{r}
+valueBox("p = 0.05 — not significant",
+         icon = "fa-times-circle",
+         color = "warning")
+```
+
+Page 3: Predictive Model {data-icon="fa-chart-line"}
+===
+
+Column {data-width=600}
+---
+
+### Decision tree: key predictors of response
+
+```{r}
+rpart.plot(tree, 
+           main = "Response prediction tree")
+```
+
+Column {data-width=400}
+---
+
+### Model accuracy
+
+```{r}
+valueBox(paste0(accuracy * 100, "%"),
+         icon = "fa-bullseye",
+         color = "primary")
+```
+
+### Area under ROC curve (AUC)
+
+```{r}
+valueBox(auc_val,
+         icon = "fa-chart-area",
+         color = ifelse(auc_val >= 0.7, 
+                        "success", "warning"))
+```
+
+
+### Top targeting recommendation
+
+```{r}
+valueBox("Target: high income + recent + digital",
+         icon = "fa-crosshairs",
+         color = "success")
+```
+
