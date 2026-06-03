@@ -1,0 +1,229 @@
+---
+title: "Project - Marketing Campaign Response Analysis"
+author: Anna Bukharova
+output:
+  html_document:
+    theme: journal
+    toc: true 
+    toc_float: true 
+    toc_collapsed: true 
+date: "Last edited `r format(Sys.time(), '%d %B %Y')`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 12, fig.height = 8)
+```
+
+## Overview
+
+This analysis explores factors influencing customer responses to a marketing campaign and builds a predictive model for campaign acceptance.
+
+**Research goal:** Identify which customer characteristics predict campaign response and provide actionable recommendations for targeting strategy.
+
+```{r}
+library(readr)
+library(lubridate)
+library (ggplot2)
+library(magrittr) 
+library(dplyr)
+# install.packages("coin")
+library (coin)
+# install.packages("rpart.plot")
+library(rpart.plot)
+# install.packages("pROC")
+library(pROC)
+```
+
+```{r}
+data <- read_csv("~/Documents/r files/ml_project1_data.csv")
+```
+
+
+
+## Research questions 
+### Question 1 
+**Does day of week affect campaign response?** 
+
+**Hypothesis:** Customers who enrolled on weekends are more likely to respond to campaign
+
+```{r}
+data$week = wday(data$Dt_Customer, label = TRUE) # adding 'day of week' variable. 
+data$Response = as.factor(data$Response)
+```
+
+```{r}
+data2 = data %>% filter(Response == 1) %>%
+  group_by(week) %>%
+  summarise(count = n())
+```
+
+```{r}
+ch = chisq.test(data$Response, data$week)
+ch
+```
+
+```{r}
+ggplot(data = data2) +
+  geom_bar(aes(x = week, y = count), 
+           stat = "identity", fill = "#104E8B") +
+  geom_text(aes(x = week, y = count, 
+                label = count), vjust = -0.5, size = 3.5) +
+  labs(title = "Campaign responses by day of week",
+    subtitle = "No statistically significant relationship detected",
+    x = "Day of week",
+    y = "Number of responses") +
+  theme_classic() 
+```
+
+
+**Results:** Hypothesis is not confirmed since p-value is higher than 0.01 (p-value = 0.09). The chi-square test shows that there is no statistically significant relationship between the day of the week and if the customer responses to the campaign. Therefore, day of the week can be exluded from the predictive model. 
+
+### Question 2:
+**Does income level predict campaign response?**
+
+**Hypothesis:** Higher-income customers are more likely  to respond to campaigns.
+
+```{r}
+data3 = data %>% filter(!is.na(Income))
+mean_income = mean(data3$Income)
+```
+
+```{r}
+data3 = mutate(data3, 
+               income_group = factor(case_when(Income < mean_income ~ "below average", TRUE ~ "above average")))
+```
+
+```{r}
+ch2 = chisq.test(data3$Response, data3$income_group)
+ch2
+```
+
+```{r}
+data3 = data3 %>% filter (Response == 1) %>% group_by (income_group) %>% 
+  summarise (count = n()) %>% 
+  mutate(pct = round(count / sum(count) * 100, 1))
+```
+
+```{r}
+ggplot(data3, 
+       aes(x = income_group, y = count)) +
+  geom_bar(stat = "identity", fill = "#104E8B") +
+  geom_text(aes(label = paste0(count, 
+                               " (", pct, "%)")),
+            vjust = -0.5, size = 3.5) +
+  labs(x = "Income group", 
+       y = "Number of responses") +
+  theme_classic()
+```
+
+**Results:** Hypothesis is  confirmed since p-value is lower than 0.01. The chi-square test shows that customers with above average income are significantly more likely to respond.
+
+### Question 3:
+**Does a type of place (web site or directly in store) affect if customers reponce to the campaign?**
+
+**Hypothesis:** Customers making more purchases in the website rather than directly in the store are more likely to respond to the campaign. 
+```{r}
+t.test (data$NumWebPurchases ~ data$Response)
+```
+
+```{r}
+ggplot() + 
+  geom_boxplot(data = data, aes(x=Response, y=NumWebPurchases), fill="#BFEFFF") +
+    labs(x = "Campaign response (0 = No, 1 = Yes)", y = "Number of web purchases") +
+  ggtitle ("Campaign Responses by number of online purchases") +
+  theme_classic()
+```
+
+```{r}
+t.test (data$NumStorePurchases ~ data$Response)
+```
+
+```{r}
+ggplot() + 
+  geom_boxplot(data = data, aes(x=Response, y=NumStorePurchases), fill="#BFEFFF") +
+    labs(x = "Campaign response (0 = No, 1 = Yes)", y = "Number of web purchases") +
+  ggtitle ("Campaign Responses by number of offline purchases") +
+  theme_classic()
+```
+
+**Results:** Hypothesis is partly confirmed. T-test shows that there is a statistically significant difference in mean web purchases between responders and non-responders (p-value < 0.01). Responders have a higher mean of purchases than non-responders. 
+However, no significant difference was found for offline store purchases (p > 0.01), suggesting that digital engagement and not overall purchase frequency is the key behavioural signal for campaign responsiveness.
+
+### Question 4:
+**Does a number of days since the last purchase affects the campaign response?**
+
+**Hypothesis:** Customers who purchased more recently are more likely to respond to the campaign 
+```{r}
+t.test (data$Recency ~ data$Response)
+```
+
+```{r}
+ggplot() + 
+  geom_boxplot(data = data, aes(x=Response, y=Recency), fill="#BFEFFF") +
+    labs(x = "Campaign response (0 = No, 1 = Yes)", y = "Days since last purchase") +
+  ggtitle ("Campaign responses by recency of the purchase") +
+  theme_classic()
+```
+
+**Results:** Hypothesis is confirmed since t-test shows that there is a statistically significant difference in recency between responders and non-responders (p-value < 0.01). Responders show significantly lower recency values which indicates more recent engagement.
+
+### Predictive Model 
+
+```{r}
+set.seed(888)
+train_index = sample(1:nrow(data), size = 0.8 * nrow(data))
+
+train = data[train_index, ]
+test = data[-train_index, ]
+```
+
+```{r}
+tree = rpart(
+  Response ~ Income + NumWebPurchases + Recency,
+  data = train,
+  method = "class",
+  weights = ifelse(train$Response == 1, 5, 1)) # added 5 times more weight to class 1 since there are more negative cases in the dataset
+rpart.plot(tree)
+```
+
+```{r}
+pred_class = predict(
+  tree,
+  newdata = test,
+  type = "class")
+
+pred_prob = predict(
+  tree,
+  newdata = test,
+  type = "prob")
+
+mean(pred_class == test$Response)
+```
+
+```{r}
+table(pred_class, test$Response)
+```
+
+```{r}
+roc_obj = roc(test$Response, pred_prob[,2])
+auc(roc_obj)
+plot(roc_obj)
+```
+
+Model accuracy: 0.74 Area under the curve: 0.66. 
+Given the class imbalance in the dataset, overall accuracy is less informative than AUC. The AUC of 0.66 indicates moderate predictive ability above a random baseline.
+While the model is not highly precise at individual-level prediction, it provides meaningful segmentation and ranking capability for marketing targeting purposes. 
+
+The decision tree reveals that Income is the strongest predictor of campaign response, acting as the primary segmentation factor in customer targeting. Customers with higher income levels are more likely to respond, indicating that purchasing power is a key driver of marketing engagement.
+
+Among lower income customers, Recency becomes the most important behavioral factor. Customers who have interacted with the company more recently show significantly higher response rates especially when combined with online purchasing activity.
+
+## Key Findings and Recommendations
+
+* Income significantly predicts response -> Prioritise above average income segment in campaign targeting
+* Recency influences response -> Focus re-engagement efforts on recently active users
+* Web purchases increase likelihood of response -> Focus on digital campaigns
+* Low-income + inactive customers show low response probability -> Reduce marketing spend or use low-cost outreach strategies for these segments
+* Day of week has no effect -> Campaign can be launched on any day 
+
+
