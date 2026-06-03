@@ -1,5 +1,7 @@
 # Marketing-Campaign-Response-Analysis
 
+## [View Full Analysis](https://rpubs.com/annboo/1438285).  Link to the RPub with the html file of the project. 
+
 ## Overview
 An exploratory and predictive analysis of customer  responses to a marketing campaign, using a real-world 
 dataset of 2,240 customers. The project combines hypothesis-driven statistical testing with a  decision tree model to identify the key drivers  of campaign acceptance and produce actionable targeting recommendations.
